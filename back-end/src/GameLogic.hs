@@ -4,6 +4,7 @@ module GameLogic
  , startGame
  , PlayerId
  , PlayerInput()
+ , noPlayerInput
  , tickGame
  , DrawCommand(..)
  , drawGame

@@ -4,6 +4,7 @@ import qualified Network.WebSockets as WS
 import System.IO.Error
 import System.Environment
 import System.Exit
+import Control.Concurrent
 import Control.Concurrent.MVar
 import Control.Exception
 import Control.Monad
@@ -33,37 +34,57 @@ main :: IO ()
 main = do
   putStrLn "ok, let's do this..."
   state <- newMVar initialServerState
-  WS.runServer addr port (app state)
+  forkIO (forever $ gameLoop state >> threadDelay 1000000)
+  WS.runServer addr port (handleRequests state)
   where
     addr = "127.0.0.1"
     port = 58436
 
-app :: MVar ServerState -> WS.ServerApp
-app state pendingConn = do
+gameLoop :: MVar ServerState -> IO ()
+gameLoop state = do
+  putStrLn "loop"
+  s <- modifyMVar state $ \s -> return $
+    if Map.null (clients s)
+    then (s, s)
+    else let s' = s { game = tickGame (const noPlayerInput) (game s) }
+         in (s', s')
+  let drawCommands = drawGame (game s)
+  forM_ (Map.elems (clients s)) $ \conn -> do
+    putStrLn "  sending"
+    sendDrawCommands conn drawCommands
+
+handleRequests :: MVar ServerState -> WS.ServerApp
+handleRequests state pendingConn = do
   let path = WS.requestPath (WS.pendingRequest pendingConn)
   putStrLn $ "accepting request for " ++ show path
   conn <- WS.acceptRequest pendingConn
   clientID <- addClient state conn
   putStrLn $ "(client " ++ show clientID ++ ")"
   ( do
-    sendTestData conn
     listenTo conn )
     `finally` removeClient state clientID
 
-sendTestData ::
-  WS.Connection -> IO ()
-sendTestData conn =
+sendDrawCommands ::
+  WS.Connection -> [DrawCommand] -> IO ()
+sendDrawCommands conn commands =
     WS.sendBinaryData conn
   . toLazyByteString
   . foldMap serializeDrawCommand
-  $ [ DrawCommand 0 (Vec 0 0) ]
+  $ commands
 
 -- Add new client to the list and return the new id.
 addClient :: MVar ServerState -> WS.Connection -> IO ClientID
 addClient state conn = modifyMVar state $ \s -> return $
   let id = nextClientID s
       clients' = Map.insert id conn (clients s)
-  in (s { clients = clients', nextClientID = id+1 }, id)
+      game' = if Map.null (clients s) then startGame else game s
+  in ( ServerState
+       { clients = clients'
+       , nextClientID = id+1
+       , game = game'
+       }
+     , id
+     )
 
 -- Remove client from list.
 removeClient :: MVar ServerState -> ClientID -> IO ()
@@ -76,9 +97,3 @@ removeClient state id = do
 listenTo :: WS.Connection -> IO ()
 listenTo conn = forever $ do
   (WS.receiveData conn :: IO BS.ByteString)
-
--- broadcastData :: ServerState -> SyncObject -> BS.ByteString -> IO ()
--- broadcastData s so syncData =
---   let clientsMap = Map.findWithDefault Map.empty so (clients s)
---   in forM_ (Map.elems clientsMap) $ \conn ->
---     sendBinaryData conn syncData
