@@ -15,14 +15,16 @@ function onLoad() {
 
   adjustSize(surface);
 
-//  document.addEventListener("keydown",
-//    function(e) {onKeyDown(state, e);} );
-//  document.addEventListener("keyup",
-//    function(e) {onKeyUp(state, e);} );
+  const socket = tryConnect(surface);
+
+  const inputKeysState = {bits: 0};
+
+  document.addEventListener("keydown",
+    function(e) {onKeyDown(socket, inputKeysState, e);} );
+  document.addEventListener("keyup",
+    function(e) {onKeyUp(socket, inputKeysState, e);} );
   window.addEventListener("resize",
     function(e) {adjustSize(surface);} );
-
-  tryConnect(surface);
 }
 
 function tryConnect(surface) {
@@ -32,7 +34,9 @@ function tryConnect(surface) {
   socket.onclose = () => {console.log("socket closed");}
   socket.onerror = () => {console.log("socket error");}
   socket.onopen = () => {console.log("socket connected");}
-  socket.onmessage = (e) => onMessage(surface, e);
+  socket.onmessage = (e) => {onMessage(surface, e);}
+
+  return socket;
 }
 
 function onMessage(surface, e) {
@@ -75,4 +79,46 @@ function draw(surface, commands) {
     ctx.fillStyle = "#ff0000";
     ctx.fillRect(x-5, y-5, 10, 10);
   }
+}
+
+function onKeyDown(socket, inputKeysState, e) {
+  onKey(socket, inputKeysState, e, true);
+}
+function onKeyUp(socket, inputKeysState, e) {
+  onKey(socket, inputKeysState, e, false);
+}
+
+function onKey(socket, inputKeysState, e, isDown) {
+  const index = keyCodeToSerializationIndex(e.keyCode);
+
+  if (index >= 0) {
+    e.preventDefault();
+
+    const bit = 2**index;
+    if (isDown) {
+      inputKeysState.bits = inputKeysState.bits | bit;
+    }
+    else {
+      inputKeysState.bits = inputKeysState.bits & (~ bit);
+    }
+
+    console.log("bits: " + inputKeysState.bits);
+    sendInputKeysState(socket, inputKeysState);
+  }
+}
+
+function keyCodeToSerializationIndex(keyCode) {
+  if (keyCode == 37) return 0;
+  if (keyCode == 39) return 1;
+  if (keyCode == 40) return 2;
+  if (keyCode == 38) return 3;
+  if (keyCode == 32) return 4;
+  return -1;
+}
+
+function sendInputKeysState(socket, inputKeysState) {
+  const arrayBuffer = new ArrayBuffer(1);
+  const view = new DataView(arrayBuffer);
+  view.setUint8(0, inputKeysState.bits);
+  socket.send(arrayBuffer);
 }
