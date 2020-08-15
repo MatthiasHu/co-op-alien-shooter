@@ -8,7 +8,7 @@ author:              Matthias Hutzler
 maintainer:          matthias.hutzler@math.uni-augsburg.de
 build-type:          Simple
 
-executable stupid-sync
+executable co-op-alien-shooter
   main-is:             Main.hs
   other-modules:       GameLogic
                        Serialization
