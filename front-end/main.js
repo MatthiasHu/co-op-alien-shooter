@@ -37,7 +37,6 @@ function tryConnect(surface) {
 
 function onMessage(surface, e) {
   // do something with the blob e.data ...
-  console.log("received data of size " + e.data.size);
   const reader = new FileReader();
   reader.onload = () => {
     const dataView = new DataView(reader.result);
@@ -66,14 +65,13 @@ function draw(surface, commands) {
 
   const commandLength = 6;
 
-  console.log("drawing: " + commands.byteLength + " bytes");
   for (let offset = 0;
        offset + commandLength <= commands.byteLength;
        offset += commandLength) {
     const imageName = commands.getUint16(offset + 0) + ".png";
-    const x = (commands.getUint16(offset + 2) / (2**16) * 2 - 0.5) * d;
-    const y = (commands.getUint16(offset + 4) / (2**16) * 2 - 0.5) * d;
-    console.log("should draw " + imageName);
+    const x = ((    (commands.getUint16(offset + 2) / (2**16))) * 2 - 0.5) * d;
+    const y = ((1 - (commands.getUint16(offset + 4) / (2**16))) * 2 - 0.5) * d;
+    // console.log("should draw " + imageName);
     ctx.fillStyle = "#ff0000";
     ctx.fillRect(x-5, y-5, 10, 10);
   }

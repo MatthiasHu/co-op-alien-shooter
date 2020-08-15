@@ -34,7 +34,7 @@ main :: IO ()
 main = do
   putStrLn "ok, let's do this..."
   state <- newMVar initialServerState
-  forkIO (forever $ gameLoop state >> threadDelay 1000000)
+  forkIO (forever $ gameLoop state >> threadDelay 30000)
   WS.runServer addr port (handleRequests state)
   where
     addr = "127.0.0.1"
@@ -42,7 +42,6 @@ main = do
 
 gameLoop :: MVar ServerState -> IO ()
 gameLoop state = do
-  putStrLn "loop"
   s <- modifyMVar state $ \s -> return $
     if Map.null (clients s)
     then (s, s)
@@ -50,7 +49,6 @@ gameLoop state = do
          in (s', s')
   let drawCommands = drawGame (game s)
   forM_ (Map.elems (clients s)) $ \conn -> do
-    putStrLn "  sending"
     sendDrawCommands conn drawCommands
 
 handleRequests :: MVar ServerState -> WS.ServerApp
