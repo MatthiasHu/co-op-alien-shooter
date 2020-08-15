@@ -28,8 +28,8 @@ function onLoad() {
 }
 
 function tryConnect(surface) {
-  // const url = "wss://monus.de/co-op-alien-shooter-entry/default"
-  const url = "ws://127.0.0.1:58436/default"
+  const url = "wss://monus.de/co-op-alien-shooter-entry/default"
+  // const url = "ws://127.0.0.1:58436/default"
   const socket = new WebSocket(url);
   socket.onclose = () => {console.log("socket closed");}
   socket.onerror = () => {console.log("socket error");}
