@@ -1,11 +1,11 @@
 module GameLogic
- ( Vec
+ ( Vec(..)
  , Game()
  , startGame
  , PlayerId
  , PlayerInput()
  , tickGame
- , DrawCommand
+ , DrawCommand(..)
  , drawGame
  ) where
 

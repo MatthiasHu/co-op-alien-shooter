@@ -3,7 +3,6 @@
 function onLoad() {
   console.log("ok, let's do this...");
 
-
   const canvas = document.getElementById("game-canvas")
   const ctx = canvas.getContext("2d");
 
@@ -23,29 +22,27 @@ function onLoad() {
   window.addEventListener("resize",
     function(e) {adjustSize(surface);} );
 
-  tryConnect();
-
-  draw(ctx);
+  tryConnect(surface);
 }
 
-function tryConnect() {
+function tryConnect(surface) {
   // const url = "wss://monus.de/co-op-alien-shooter-entry/default"
   const url = "ws://127.0.0.1:58436/default"
   const socket = new WebSocket(url);
   socket.onclose = () => {console.log("socket closed");}
   socket.onerror = () => {console.log("socket error");}
   socket.onopen = () => {console.log("socket connected");}
-  socket.onmessage = onMessage;
+  socket.onmessage = (e) => onMessage(surface, e);
 }
 
-function onMessage(e) {
+function onMessage(surface, e) {
   // do something with the blob e.data ...
   console.log("received data of size " + e.data.size);
   const reader = new FileReader();
   reader.onload = () => {
-    const arr = new Uint16Array(reader.result);
-    console.log("first byte: " + arr[0])
-    // ...
+    const dataView = new DataView(reader.result);
+    // (DataView uses big endian by default.)
+    draw(surface, dataView);
   };
   reader.readAsArrayBuffer(e.data);
 }
@@ -60,11 +57,24 @@ function adjustSize(surface) {
   surface.ctx.textAlign = "center";
 }
 
-function draw(ctx) {
-  drawBackground(ctx);
-}
+function draw(surface, commands) {
+  const d = surface.dim;
+  const ctx = surface.ctx;
 
-function drawBackground(ctx) {
-  ctx.fillStyle = "#0000ff";
-  ctx.fillRect(0, 0, 100, 100);
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, d, d);
+
+  const commandLength = 6;
+
+  console.log("drawing: " + commands.byteLength + " bytes");
+  for (let offset = 0;
+       offset + commandLength <= commands.byteLength;
+       offset += commandLength) {
+    const imageName = commands.getUint16(offset + 0) + ".png";
+    const x = (commands.getUint16(offset + 2) / (2**16) * 2 - 0.5) * d;
+    const y = (commands.getUint16(offset + 4) / (2**16) * 2 - 0.5) * d;
+    console.log("should draw " + imageName);
+    ctx.fillStyle = "#ff0000";
+    ctx.fillRect(x-5, y-5, 10, 10);
+  }
 }

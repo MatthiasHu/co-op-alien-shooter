@@ -10,10 +10,12 @@ import Control.Monad
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS.Char8
+import Data.ByteString.Builder
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 
 import GameLogic
+import Serialization
 
 
 type ClientID = Int
@@ -39,18 +41,22 @@ main = do
 app :: MVar ServerState -> WS.ServerApp
 app state pendingConn = do
   let path = WS.requestPath (WS.pendingRequest pendingConn)
-  putStrLn $ "accepting request for " ++ BS.Char8.unpack path
+  putStrLn $ "accepting request for " ++ show path
   conn <- WS.acceptRequest pendingConn
   clientID <- addClient state conn
   putStrLn $ "(client " ++ show clientID ++ ")"
   ( do
+    sendTestData conn
     listenTo conn )
     `finally` removeClient state clientID
 
 sendTestData ::
   WS.Connection -> IO ()
-sendTestData conn = do
-  WS.sendBinaryData conn (BS.pack [0, 0, 0, 0, 0, 0])
+sendTestData conn =
+    WS.sendBinaryData conn
+  . toLazyByteString
+  . foldMap serializeDrawCommand
+  $ [ DrawCommand 0 (Vec 0 0) ]
 
 -- Add new client to the list and return the new id.
 addClient :: MVar ServerState -> WS.Connection -> IO ClientID
