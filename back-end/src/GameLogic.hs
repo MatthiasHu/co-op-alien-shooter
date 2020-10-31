@@ -25,6 +25,7 @@ data Game = Game
   { time :: Int
   , aliens :: [Alien]
   , players :: PlayersMap
+  , bullets :: [Bullet]
   }
 
 type PlayersMap = M.Map PlayerId Player
@@ -38,8 +39,17 @@ data Player = Player
   , playerVel :: Vec
   }
 
+data Bullet = Bullet
+  { bulletPos :: Vec
+  }
+
 startGame :: Game
-startGame = Game 0 [] M.empty
+startGame = Game
+  { time = 0
+  , aliens = []
+  , players = M.empty
+  , bullets = [Bullet (Vec 0 0)]
+  }
 
 type PlayerId = Int
 
@@ -61,6 +71,9 @@ tickGame playerInputs =
   >.> (\g -> g {aliens = aliens g ++ spawningAliens g})
   >.> (\g -> g {aliens = filter (not . alienDead) (aliens g)})
   >.> (\g -> g {players = tickPlayers playerInputs (players g)})
+  >.> (\g -> g {bullets = map tickBullet (bullets g)})
+  >.> (\g -> g {bullets = bullets g ++ spawningBullets g playerInputs})
+  >.> (\g -> g {bullets = filter (not . bulletDead) (bullets g)})
   where
     f1 >.> f2 = \x -> f1 (f2 x)
 
@@ -69,7 +82,8 @@ spawningAliens g =
   if time g `mod` 10 == 0
   then let t = fromIntegral (time g `div` 10)
            fractionalPart x = x - fromIntegral (round x)
-       in [Alien (Vec (fractionalPart (t * 0.39) * 1.6) 1.5)]
+           alien = Alien (Vec (fractionalPart (t * 0.39) * 1.6) 1.5)
+       in [alien]
   else []
 
 tickAlien :: Alien -> Alien
@@ -106,6 +120,20 @@ tickPlayer p input =
     du = if downPressed  input then -1 else 0
        + if upPressed    input then  1 else 0
 
+spawningBullets :: Game -> M.Map PlayerId PlayerInput -> [Bullet]
+spawningBullets g playerInputs = do
+  (playerId, input) <- M.assocs playerInputs
+  let pos = playerPos (players g M.! playerId)
+  if shootPressed input
+  then [Bullet pos]
+  else []
+
+tickBullet :: Bullet -> Bullet
+tickBullet (Bullet pos) = Bullet (Vec (vecX pos) (vecY pos + 0.02))
+
+bulletDead :: Bullet -> Bool
+bulletDead (Bullet pos) = vecY pos > 1.5
+
 type ImageId = Word16
 
 data DrawCommand = DrawCommand
@@ -117,3 +145,4 @@ drawGame :: Game -> [DrawCommand]
 drawGame g = []
   ++ [ DrawCommand 1 (alienPos a) | a <- aliens g ]
   ++ [ DrawCommand 0 (playerPos p) | p <- M.elems (players g) ]
+  ++ [ DrawCommand 2 (bulletPos p) | p <- bullets g ]
