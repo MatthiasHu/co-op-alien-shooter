@@ -21,6 +21,9 @@ data Vec = Vec
   , vecY :: Float
   }
 
+norm :: Vec -> Float
+norm (Vec x y) = sqrt (x^2 + y^2)
+
 data Game = Game
   { time :: Int
   , aliens :: [Alien]
@@ -37,6 +40,7 @@ data Alien = Alien
 data Player = Player
   { playerPos :: Vec
   , playerVel :: Vec
+  , playerShootCharge :: Float
   }
 
 data Bullet = Bullet
@@ -48,7 +52,7 @@ startGame = Game
   { time = 0
   , aliens = []
   , players = M.empty
-  , bullets = [Bullet (Vec 0 0)]
+  , bullets = []
   }
 
 type PlayerId = Int
@@ -102,12 +106,17 @@ tickPlayers playerInputs playersMap =
       ((M.keysSet playerInputs) S.\\ (M.keysSet playersMap))
 
 newPlayer :: Player
-newPlayer = Player (Vec 0 (-0.6)) (Vec 0 0)
+newPlayer = Player
+  { playerPos = (Vec 0 (-0.6))
+  , playerVel = (Vec 0 0)
+  , playerShootCharge = 0
+  }
 
 tickPlayer :: Player -> PlayerInput -> Player
 tickPlayer p input =
   p { playerPos = Vec px' py'
     , playerVel = Vec vx' vy'
+    , playerShootCharge = playerShootCharge p + 0.1
     }
   where
     px' = clamp (vecX (playerPos p) + vx')
@@ -119,6 +128,21 @@ tickPlayer p input =
        + if rightPressed input then  1 else 0
     du = if downPressed  input then -1 else 0
        + if upPressed    input then  1 else 0
+
+letPlayersShoot :: Game -> M.Map PlayerId PlayerInput -> Game
+letPlayersShoot g playerInputs = g
+  { bullets = bullets g ++ map newBullet shooting
+--  , players = ...
+  }
+  where
+    shooting = shootingPlayers g playerInputs
+    newBullet playerId = Bullet (playerPos ((players g) M.! playerId))
+--    ... M.adjust (\p -> p {playerShootCharge = 0})
+
+shootingPlayers :: Game -> M.Map PlayerId PlayerInput -> [PlayerId]
+shootingPlayers g playerInputs = do
+  (playerId, input) <- M.assocs playerInputs
+  if shootPressed input then [playerId] else []
 
 spawningBullets :: Game -> M.Map PlayerId PlayerInput -> [Bullet]
 spawningBullets g playerInputs = do
