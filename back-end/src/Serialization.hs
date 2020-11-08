@@ -8,6 +8,7 @@ import Data.ByteString.Builder
 import qualified Data.ByteString as BS
 import Data.Word
 import Data.Bits
+import Linear
 
 import GameLogic
 
@@ -18,7 +19,7 @@ serializeDrawCommand (DrawCommand imageId drawPosition) =
   <> serializePosition drawPosition
 
 serializePosition :: Vec -> Builder
-serializePosition (Vec x y) =
+serializePosition (V2 x y) =
      (serializeCoordinate x)
   <> (serializeCoordinate y)
   where

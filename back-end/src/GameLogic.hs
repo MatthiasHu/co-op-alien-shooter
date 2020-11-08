@@ -14,15 +14,14 @@ module GameLogic
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Word
+import Linear
+import Control.Lens
 
 
-data Vec = Vec
-  { vecX :: Float
-  , vecY :: Float
-  }
+type Vec = V2 Float
 
 norm :: Vec -> Float
-norm (Vec x y) = sqrt (x^2 + y^2)
+norm (V2 x y) = sqrt (x^2 + y^2)
 
 data Game = Game
   { time :: Int
@@ -86,15 +85,15 @@ spawningAliens g =
   if time g `mod` 10 == 0
   then let t = fromIntegral (time g `div` 10)
            fractionalPart x = x - fromIntegral (round x)
-           alien = Alien (Vec (fractionalPart (t * 0.39) * 1.6) 1.5)
+           alien = Alien (V2 (fractionalPart (t * 0.39) * 1.6) 1.5)
        in [alien]
   else []
 
 tickAlien :: Alien -> Alien
-tickAlien (Alien (Vec x y)) = Alien (Vec x (y - 0.01))
+tickAlien (Alien (V2 x y)) = Alien (V2 x (y - 0.01))
 
 alienDead :: Alien -> Bool
-alienDead a = vecY (alienPos a) < -1.5
+alienDead a = alienPos a ^. _x < -1.5
 
 tickPlayers :: M.Map PlayerId PlayerInput -> PlayersMap -> PlayersMap
 tickPlayers playerInputs playersMap =
@@ -107,23 +106,23 @@ tickPlayers playerInputs playersMap =
 
 newPlayer :: Player
 newPlayer = Player
-  { playerPos = (Vec 0 (-0.6))
-  , playerVel = (Vec 0 0)
+  { playerPos = (V2 0 (-0.6))
+  , playerVel = (V2 0 0)
   , playerShootCharge = 0
   }
 
 tickPlayer :: Player -> PlayerInput -> Player
 tickPlayer p input =
-  p { playerPos = Vec px' py'
-    , playerVel = Vec vx' vy'
+  p { playerPos = V2 px' py'
+    , playerVel = V2 vx' vy'
     , playerShootCharge = playerShootCharge p + 0.1
     }
   where
-    px' = clamp (vecX (playerPos p) + vx')
-    py' = clamp (vecY (playerPos p) + vy')
+    px' = clamp (playerPos p ^. _x + vx')
+    py' = clamp (playerPos p ^. _y + vy')
     clamp x = max (-1) (min 1 x)
-    vx' = vecX (playerVel p) * 0.8 + lr * 0.01
-    vy' = vecY (playerVel p) * 0.8 + du * 0.01
+    vx' = (playerVel p ^. _x) * 0.8 + lr * 0.01
+    vy' = (playerVel p ^. _y) * 0.8 + du * 0.01
     lr = if leftPressed  input then -1 else 0
        + if rightPressed input then  1 else 0
     du = if downPressed  input then -1 else 0
@@ -153,10 +152,10 @@ spawningBullets g playerInputs = do
   else []
 
 tickBullet :: Bullet -> Bullet
-tickBullet (Bullet pos) = Bullet (Vec (vecX pos) (vecY pos + 0.02))
+tickBullet (Bullet pos) = Bullet (pos + (V2 0 0.02))
 
 bulletDead :: Bullet -> Bool
-bulletDead (Bullet pos) = vecY pos > 1.5
+bulletDead (Bullet pos) = pos ^. _y > 1.5
 
 type ImageId = Word16
 
