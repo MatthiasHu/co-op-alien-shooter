@@ -30,10 +30,10 @@ serializePosition (V2 x y) =
 deserializePlayerInput :: BS.ByteString -> Maybe PlayerInput
 deserializePlayerInput bs = case BS.unpack bs of
   a : _ -> Just PlayerInput
-    { leftPressed  = (testBit a 0)
-    , rightPressed = (testBit a 1)
-    , downPressed  = (testBit a 2)
-    , upPressed    = (testBit a 3)
-    , shootPressed = (testBit a 4)
+    { _leftPressed  = (testBit a 0)
+    , _rightPressed = (testBit a 1)
+    , _downPressed  = (testBit a 2)
+    , _upPressed    = (testBit a 3)
+    , _shootPressed = (testBit a 4)
     }
   _ -> Nothing

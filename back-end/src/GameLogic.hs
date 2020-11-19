@@ -1,3 +1,5 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module GameLogic
  ( Vec(..)
  , Game()
@@ -16,6 +18,9 @@ import qualified Data.Set as S
 import Data.Word
 import Linear
 import Control.Lens
+import Control.Monad.State
+import Control.Monad.Writer
+import Control.Applicative
 
 
 type Vec = V2 Float
@@ -24,135 +29,146 @@ norm :: Vec -> Float
 norm (V2 x y) = sqrt (x^2 + y^2)
 
 data Game = Game
-  { time :: Int
-  , aliens :: [Alien]
-  , players :: PlayersMap
-  , bullets :: [Bullet]
+  { _time :: Int
+  , _aliens :: [Alien]
+  , _players :: PlayersMap
+  , _bullets :: [Bullet]
   }
 
 type PlayersMap = M.Map PlayerId Player
 
 data Alien = Alien
-  { alienPos :: Vec
+  { _alienPos :: Vec
   }
 
 data Player = Player
-  { playerPos :: Vec
-  , playerVel :: Vec
-  , playerShootCharge :: Float
+  { _playerPos :: Vec
+  , _playerVel :: Vec
+  , _playerShootCharge :: Float
   }
 
 data Bullet = Bullet
-  { bulletPos :: Vec
+  { _bulletPos :: Vec
   }
 
 startGame :: Game
 startGame = Game
-  { time = 0
-  , aliens = []
-  , players = M.empty
-  , bullets = []
+  { _time = 0
+  , _aliens = []
+  , _players = M.empty
+  , _bullets = []
   }
 
 type PlayerId = Int
 
 data PlayerInput = PlayerInput
-  { leftPressed :: Bool
-  , rightPressed :: Bool
-  , upPressed :: Bool
-  , downPressed :: Bool
-  , shootPressed :: Bool
+  { _leftPressed :: Bool
+  , _rightPressed :: Bool
+  , _upPressed :: Bool
+  , _downPressed :: Bool
+  , _shootPressed :: Bool
   }
 
 noPlayerInput :: PlayerInput
 noPlayerInput = PlayerInput False False False False False
 
+$(makeLenses ''Game)
+$(makeLenses ''Alien)
+$(makeLenses ''Player)
+$(makeLenses ''Bullet)
+$(makeLenses ''PlayerInput)
+
 tickGame :: (M.Map PlayerId PlayerInput) -> Game -> Game
-tickGame playerInputs =
-      (\g -> g {time = time g + 1})
-  >.> (\g -> g {aliens = map tickAlien (aliens g)})
-  >.> (\g -> g {aliens = aliens g ++ spawningAliens g})
-  >.> (\g -> g {aliens = filter (not . alienDead) (aliens g)})
-  >.> (\g -> g {players = tickPlayers playerInputs (players g)})
-  >.> (\g -> g {bullets = map tickBullet (bullets g)})
-  >.> (\g -> g {bullets = bullets g ++ spawningBullets g playerInputs})
-  >.> (\g -> g {bullets = filter (not . bulletDead) (bullets g)})
-  where
-    f1 >.> f2 = \x -> f1 (f2 x)
+tickGame playerInputsMap = execState $ do
+  time += 1
+  let connectedPlayers = M.keysSet playerInputsMap
+  removeDisconnectedPlayers connectedPlayers
+  spawnNewPlayers connectedPlayers
+  let playerInput = playerInputsMapToFunction playerInputsMap
+  tickPlayers playerInput
+  letPlayersShoot playerInput
+  zoom (bullets . each) tickBullet
+  bullets %= filter (not . bulletDead)
+  get >>= (\g -> aliens %= (++ spawningAliens g))
+  zoom (aliens . each) tickAlien
+  aliens %= filter (not . alienDead)
+
+playerInputsMapToFunction ::
+  M.Map PlayerId PlayerInput -> PlayerId -> PlayerInput
+playerInputsMapToFunction m k = M.findWithDefault noPlayerInput k m
 
 spawningAliens :: Game -> [Alien]
 spawningAliens g =
-  if time g `mod` 10 == 0
-  then let t = fromIntegral (time g `div` 10)
+  if (g ^. time) `mod` 10 == 0
+  then let t = fromIntegral ((g ^. time) `div` 10)
            fractionalPart x = x - fromIntegral (round x)
            alien = Alien (V2 (fractionalPart (t * 0.39) * 1.6) 1.5)
        in [alien]
   else []
 
-tickAlien :: Alien -> Alien
-tickAlien (Alien (V2 x y)) = Alien (V2 x (y - 0.01))
+tickAlien :: State Alien ()
+tickAlien = do
+  alienPos += V2 0 (-0.01)
 
 alienDead :: Alien -> Bool
-alienDead a = alienPos a ^. _x < -1.5
+alienDead a = a ^. alienPos . _y < -1.5
 
-tickPlayers :: M.Map PlayerId PlayerInput -> PlayersMap -> PlayersMap
-tickPlayers playerInputs playersMap =
-  remainingPlayers `M.union` newPlayers
-  where
-    remainingPlayers =
-      M.intersectionWith tickPlayer playersMap playerInputs
-    newPlayers = M.fromSet (const newPlayer)
-      ((M.keysSet playerInputs) S.\\ (M.keysSet playersMap))
+removeDisconnectedPlayers :: S.Set PlayerId -> State Game ()
+removeDisconnectedPlayers connectedPlayers =
+  players %= flip M.restrictKeys connectedPlayers
+
+spawnNewPlayers :: S.Set PlayerId -> State Game ()
+spawnNewPlayers connectedPlayers = do
+  presentPlayers <- use (players . to M.keysSet)
+  let newPlayers = connectedPlayers S.\\ presentPlayers
+  players %= (`M.union` M.fromSet (const newPlayer) newPlayers)
 
 newPlayer :: Player
 newPlayer = Player
-  { playerPos = (V2 0 (-0.6))
-  , playerVel = (V2 0 0)
-  , playerShootCharge = 0
+  { _playerPos = (V2 0 (-0.6))
+  , _playerVel = (V2 0 0)
+  , _playerShootCharge = 0
   }
 
-tickPlayer :: Player -> PlayerInput -> Player
-tickPlayer p input =
-  p { playerPos = V2 px' py'
-    , playerVel = V2 vx' vy'
-    , playerShootCharge = playerShootCharge p + 0.1
-    }
+tickPlayers :: (PlayerId -> PlayerInput) -> State Game ()
+tickPlayers playerInput = do
+  playerIds <- use (players . to M.keys)
+  forM_ playerIds $ \playerId ->
+    zoom (players . ix playerId) (tickPlayer (playerInput playerId))
+
+tickPlayer :: PlayerInput -> State Player ()
+tickPlayer input = do
+  playerVel %= (^* 0.8)
+  playerVel += directionsPressed input ^* 0.01
+  playerPos <~ liftA2 (^+^) (use playerPos) (use playerVel)
+  playerPos %= fmap clamp
   where
-    px' = clamp (playerPos p ^. _x + vx')
-    py' = clamp (playerPos p ^. _y + vy')
     clamp x = max (-1) (min 1 x)
-    vx' = (playerVel p ^. _x) * 0.8 + lr * 0.01
-    vy' = (playerVel p ^. _y) * 0.8 + du * 0.01
-    lr = if leftPressed  input then -1 else 0
-       + if rightPressed input then  1 else 0
-    du = if downPressed  input then -1 else 0
-       + if upPressed    input then  1 else 0
 
-letPlayersShoot :: Game -> M.Map PlayerId PlayerInput -> Game
-letPlayersShoot g playerInputs = g
-  { bullets = bullets g ++ map newBullet shooting
---  , players = ...
-  }
+directionsPressed :: PlayerInput -> Vec
+directionsPressed input = V2
+  (val (input ^. rightPressed) - val (input ^. leftPressed))
+  (val (input ^.    upPressed) - val (input ^. downPressed))
   where
-    shooting = shootingPlayers g playerInputs
-    newBullet playerId = Bullet (playerPos ((players g) M.! playerId))
---    ... M.adjust (\p -> p {playerShootCharge = 0})
+    val b = if b then 1 else 0
 
-shootingPlayers :: Game -> M.Map PlayerId PlayerInput -> [PlayerId]
-shootingPlayers g playerInputs = do
-  (playerId, input) <- M.assocs playerInputs
-  if shootPressed input then [playerId] else []
+letPlayersShoot :: (PlayerId -> PlayerInput) -> State Game ()
+letPlayersShoot playerInput = do
+  playerIds <- use (players . to M.keys)
+  newBullets <- execWriterT $ forM playerIds $ \playerId ->
+    zoom (players . ix playerId) $
+      letOnePlayerShoot (playerInput playerId)
+  bullets %= (++ newBullets)
 
-spawningBullets :: Game -> M.Map PlayerId PlayerInput -> [Bullet]
-spawningBullets g playerInputs = do
-  (playerId, input) <- M.assocs playerInputs
-  let pos = playerPos (players g M.! playerId)
-  if shootPressed input
-  then [Bullet pos]
-  else []
+letOnePlayerShoot :: PlayerInput -> WriterT [Bullet] (State Player) ()
+letOnePlayerShoot input = do
+  charge <- playerShootCharge <+= 0.1
+  when (input ^. shootPressed && charge >= 1) $ do
+    playerShootCharge .= 0
+    use playerPos >>= (tell . (:[]) . Bullet)
 
-tickBullet :: Bullet -> Bullet
-tickBullet (Bullet pos) = Bullet (pos + (V2 0 0.02))
+tickBullet :: State Bullet ()
+tickBullet = bulletPos += (V2 0 0.02)
 
 bulletDead :: Bullet -> Bool
 bulletDead (Bullet pos) = pos ^. _y > 1.5
@@ -166,6 +182,6 @@ data DrawCommand = DrawCommand
 
 drawGame :: Game -> [DrawCommand]
 drawGame g = []
-  ++ [ DrawCommand 1 (alienPos a) | a <- aliens g ]
-  ++ [ DrawCommand 0 (playerPos p) | p <- M.elems (players g) ]
-  ++ [ DrawCommand 2 (bulletPos p) | p <- bullets g ]
+  ++ [ DrawCommand 1 (a ^. alienPos) | a <- _aliens g ]
+  ++ [ DrawCommand 0 (p ^. playerPos) | p <- M.elems (_players g) ]
+  ++ [ DrawCommand 2 (p ^. bulletPos) | p <- _bullets g ]
