@@ -25,9 +25,6 @@ import Control.Applicative
 
 type Vec = V2 Float
 
-norm :: Vec -> Float
-norm (V2 x y) = sqrt (x^2 + y^2)
-
 data Game = Game
   { _time :: Int
   , _aliens :: [Alien]
@@ -39,6 +36,7 @@ type PlayersMap = M.Map PlayerId Player
 
 data Alien = Alien
   { _alienPos :: Vec
+  , _alienDead :: Bool
   }
 
 data Player = Player
@@ -49,6 +47,7 @@ data Player = Player
 
 data Bullet = Bullet
   { _bulletPos :: Vec
+  , _bulletDead :: Bool
   }
 
 startGame :: Game
@@ -88,10 +87,11 @@ tickGame playerInputsMap = execState $ do
   tickPlayers playerInput
   letPlayersShoot playerInput
   zoom (bullets . each) tickBullet
-  bullets %= filter (not . bulletDead)
   get >>= (\g -> aliens %= (++ spawningAliens g))
   zoom (aliens . each) tickAlien
-  aliens %= filter (not . alienDead)
+  letBulletsHit
+  bullets %= filter (not . view bulletDead)
+  aliens %= filter (not . view alienDead)
 
 playerInputsMapToFunction ::
   M.Map PlayerId PlayerInput -> PlayerId -> PlayerInput
@@ -99,19 +99,24 @@ playerInputsMapToFunction m k = M.findWithDefault noPlayerInput k m
 
 spawningAliens :: Game -> [Alien]
 spawningAliens g =
-  if (g ^. time) `mod` 10 == 0
-  then let t = fromIntegral ((g ^. time) `div` 10)
+  if (g ^. time) `mod` 20 == 0
+  then let t = fromIntegral ((g ^. time) `div` 20)
            fractionalPart x = x - fromIntegral (round x)
-           alien = Alien (V2 (fractionalPart (t * 0.39) * 1.6) 1.5)
+           alien = newAlien (V2 (fractionalPart (t * 0.39) * 1.6) 1.5)
        in [alien]
   else []
 
+newAlien :: Vec -> Alien
+newAlien pos = Alien
+  { _alienPos = pos
+  , _alienDead = False
+  }
+
 tickAlien :: State Alien ()
 tickAlien = do
-  alienPos += V2 0 (-0.01)
-
-alienDead :: Alien -> Bool
-alienDead a = a ^. alienPos . _y < -1.5
+  pos <- alienPos <+= V2 0 (-0.01)
+  when (pos ^. _y < -1.5) $
+    alienDead .= True
 
 removeDisconnectedPlayers :: S.Set PlayerId -> State Game ()
 removeDisconnectedPlayers connectedPlayers =
@@ -138,7 +143,7 @@ tickPlayers playerInput = do
 
 tickPlayer :: PlayerInput -> State Player ()
 tickPlayer input = do
-  playerVel %= (^* 0.8)
+  playerVel %= (^* 0.6)
   playerVel += directionsPressed input ^* 0.01
   playerPos <~ liftA2 (^+^) (use playerPos) (use playerVel)
   playerPos %= fmap clamp
@@ -162,16 +167,65 @@ letPlayersShoot playerInput = do
 
 letOnePlayerShoot :: PlayerInput -> WriterT [Bullet] (State Player) ()
 letOnePlayerShoot input = do
-  charge <- playerShootCharge <+= 0.1
+  charge <- playerShootCharge <+= 0.05
   when (input ^. shootPressed && charge >= 1) $ do
     playerShootCharge .= 0
-    use playerPos >>= (tell . (:[]) . Bullet)
+    use playerPos >>= (tell . (:[]) . newBullet)
+
+newBullet :: Vec -> Bullet
+newBullet pos = Bullet
+  { _bulletPos = pos
+  , _bulletDead = False
+  }
 
 tickBullet :: State Bullet ()
-tickBullet = bulletPos += (V2 0 0.02)
+tickBullet = do
+  pos <- bulletPos <+= (V2 0 0.03)
+  when (pos ^. _y > 1.5) $
+    bulletDead .= True
 
-bulletDead :: Bullet -> Bool
-bulletDead (Bullet pos) = pos ^. _y > 1.5
+letBulletsHit :: State Game ()
+letBulletsHit = do
+  oldAliens <- use aliens
+  oldBullets <- use bullets
+  let (newAliens, newBullets) =
+        mapPairs alienBulletCollision oldAliens oldBullets
+  aliens .= newAliens
+  bullets .= newBullets
+
+alienBulletCollision :: Alien -> Bullet -> (Alien, Bullet)
+alienBulletCollision a b =
+  if isCollision a b
+  then (a & alienDead .~ True, b & bulletDead .~ True)
+  else (a, b)
+
+class Collidable a where
+  center :: a -> Vec
+  radius :: a -> Float
+
+instance Collidable Alien where
+  center a = a ^. alienPos
+  radius a = 0.05
+
+instance Collidable Bullet where
+  center b = b ^. bulletPos
+  radius b = 0.05
+
+isCollision :: (Collidable a, Collidable b) => a -> b -> Bool
+isCollision a b = norm (center a - center b) < radius a + radius b
+
+mapPairs :: (a -> b -> (a, b)) -> [a] -> [b] -> ([a], [b])
+mapPairs modification [] bs = ([], bs)
+mapPairs modification (a:as) bs = (a':as', bs'')
+  where
+    (a', bs') = inner a bs
+    (as', bs'') = mapPairs modification as bs'
+    inner a [] = (a, [])
+    inner a (b:bs) =
+      let
+        (a', b') = modification a b
+        (a'', bs') = inner a' bs
+      in (a'', b':bs')
 
 type ImageId = Word16
 
